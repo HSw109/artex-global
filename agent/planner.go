@@ -35,6 +35,7 @@ type Planner struct {
 	webSearch         WebSearchOpts                          // web_search tool backend selection (off by default)
 	workDir           string                                 // shared work dir (surfaced in prompt as artifact-output target)
 	injectConstraints func() bool                            // resolver: inject task operation constraints into system prompt? (nil = yes)
+	researchMode      func() bool                            // resolver: append the four-phase research discipline? (nil = no)
 	nonStreamingFn    func() bool                            // resolver: use non-streaming (Complete) path? (nil = streaming)
 	noaEnabledFn      func() bool                            // resolver: use experimental noa compaction? (nil = off)
 	maxTokensFn       func() int                             // resolver: per-reply output cap (nil/0 = send no cap)
@@ -102,6 +103,14 @@ func (p *Planner) SetConstraintInject(fn func() bool) { p.injectConstraints = fn
 
 // wantConstraints reports whether constraint injection is enabled (default yes).
 func (p *Planner) wantConstraints() bool { return p.injectConstraints == nil || p.injectConstraints() }
+
+// SetResearchMode wires a resolver deciding whether the four-phase research
+// discipline is appended to this task's planner prompt. Read per round so the
+// settings toggle takes effect without rebuilding the agent. nil = off (default).
+func (p *Planner) SetResearchMode(fn func() bool) { p.researchMode = fn }
+
+// wantResearch reports whether the research overlay is enabled (default no).
+func (p *Planner) wantResearch() bool { return p.researchMode != nil && p.researchMode() }
 
 // todoFor returns the task's persistent planning todo store, creating it on first
 // use. Shared across all of this task's planner wake-ups.
@@ -393,6 +402,9 @@ func (p *Planner) Plan(ctx context.Context, taskID int64, as *db.AssetStore, ts 
 	sysBody := plannerSystem(goal, p.workDir, taskDir)
 	if p.wantConstraints() {
 		sysBody += constraintBlock(ts) // 操作约束(若有)注入系统提示,框定探索边界
+	}
+	if p.wantResearch() {
+		sysBody += researchModeBlock("planner") // 研究模式(可选):四阶段漏洞研究纪律
 	}
 	system, boundary := deferredSystem(sysBody, def)
 	// planner 无自身墙钟预算;有 deadline 时把 MaxDuration 夹逼到剩余,让在跑的规划轮在
